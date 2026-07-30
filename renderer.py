@@ -41,7 +41,7 @@ def project(vertices, yaw, pitch, roll, distance, canvas_w, canvas_h,
     return points2d, z
 
 
-def draw_wireframe(canvas, points2d, depths, edges, color=(0, 220, 255)):
+def draw_wireframe(canvas, points2d, depths, edges, color=(0, 220, 255), base_thickness=1):
     """
     Dibuja las aristas del modelo variando levemente grosor/brillo según
     la profundidad (depth cue barato). Esto refuerza la sensación de 3D
@@ -59,8 +59,8 @@ def draw_wireframe(canvas, points2d, depths, edges, color=(0, 220, 255)):
 
         avg_depth = (depths[i] + depths[j]) / 2.0
         closeness = 1.0 - (avg_depth - dmin) / drange  # 1 = más cerca
-        thickness = 1 + int(round(closeness * 2))
-        shade = 0.5 + 0.5 * closeness
+        thickness = base_thickness + int(round(closeness * 1.5))
+        shade = 0.4 + 0.6 * closeness
         b, g, r = color
         c = (int(b * shade), int(g * shade), int(r * shade))
 

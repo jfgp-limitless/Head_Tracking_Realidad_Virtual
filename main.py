@@ -26,27 +26,38 @@ from renderer import project, draw_wireframe
 CANVAS_W, CANVAS_H = 520, 520
 CAM_W, CAM_H = 640, 480
 
-MAX_YAW_DEG = 50
-MAX_PITCH_DEG = 35
+MAX_YAW_DEG = 45
+MAX_PITCH_DEG = 30
 BASE_DISTANCE = 6.0
 DISTANCE_RANGE = 2.0
-FOCAL = 300
+FOCAL = 320
 
-MAX_TOTAL_EDGES = 3000       # presupuesto total de aristas para los modelos CAD
-OBJECT_TARGET_SIZE = 0.85     # tamaño normalizado de cada modelo en la escena
+# Multiplicadores de FUERZA para el modelo STL vs el cuarto
+STL_YAW_MULT = 2.6       # Amplifica la rotación horizontal del STL
+STL_PITCH_MULT = 2.6     # Amplifica la rotación vertical del STL
+STL_ROLL_MULT = 2.0      # Amplifica la inclinación del STL
+STL_SHIFT_MULT_X = 70.0  # Desplazamiento lateral dinámico del STL
+STL_SHIFT_MULT_Y = 50.0  # Desplazamiento vertical dinámico del STL
+STL_ZOOM_MULT = 3.2      # Sensibilidad de acercamiento/alejamiento del STL
 
-BG_COLOR = (110, 60, 15)      # azul "ingeniería" (BGR)
-GRID_COLOR = (245, 245, 245)  # blanco
+MAX_TOTAL_EDGES = 3000       # Presupuesto total de aristas para los modelos CAD
+OBJECT_TARGET_SIZE = 0.85     # Tamaño normalizado de cada modelo en la escena
+
+BG_COLOR = (110, 60, 15)      # Azul "ingeniería" (BGR)
+GRID_COLOR = (180, 160, 130)  # Rejilla tenue de las paredes y piso del cuarto
+FRAME_COLOR = (255, 240, 200) # Marcos y esquinas brillantes del cuarto 3D
 
 MODEL_COLORS = [
-    (0, 210, 255),   # ámbar
-    (255, 200, 0),   # celeste
-    (120, 255, 120), # verde
-    (255, 120, 255), # magenta
-    (0, 140, 255),   # naranja
+    (0, 215, 255),   # Ámbar brillante
+    (255, 215, 0),   # Celeste brillante
+    (100, 255, 120), # Verde brillante
+    (255, 120, 255), # Magenta
+    (0, 140, 255),   # Naranja
 ]
 
-ROOM_VERTS, ROOM_EDGES = build_room(width=7.5, depth=8.0, floor_y=2.1, ceil_y=-2.6, step=0.7)
+ROOM_VERTS, ROOM_GRID_EDGES, ROOM_FRAME_EDGES = build_room(
+    width=9.75, depth=9.0, floor_y=4.875, ceil_y=-4.875, num_grid_x=10, num_grid_y=10, num_grid_z=9
+)
 
 
 def pick_cad_files():
@@ -104,7 +115,7 @@ def main():
     cam = Camera(index=0, width=CAM_W, height=CAM_H, fps=20)
     tracker = HeadTracker(smoothing=0.35, detect_roll=True)
 
-    print("=== Head Tracking CAD Viewer ===")
+    print("=== Head Tracking CAD Viewer (Cuarto 3D Fijo & STL Móvil) ===")
     print("Selecciona tus archivos CAD (.stl / .obj). Puedes elegir varios a la vez.")
     loaded_paths = pick_cad_files()
     models = build_scene(loaded_paths)
@@ -132,34 +143,52 @@ def main():
 
         if manual_reset:
             yaw, pitch, roll_rad, distance = 0.0, 0.0, 0.0, BASE_DISTANCE
+            stl_tx, stl_ty = 0.0, 0.0
             manual_reset = False
         else:
+            # Ángulos base del observador
             yaw = np.radians(hx * MAX_YAW_DEG)
             pitch = np.radians(-hy * MAX_PITCH_DEG)
             roll_rad = np.radians(np.clip(roll, -30, 30)) if found else 0.0
             distance = BASE_DISTANCE - hz * DISTANCE_RANGE
 
-        # --- fondo azul + cuadrícula del "cuarto" ---
+            # Desplazamiento dinámico para el STL
+            stl_tx = hx * STL_SHIFT_MULT_X
+            stl_ty = -hy * STL_SHIFT_MULT_Y
+
+        # --- fondo azul + estructura del "cuarto 3D completo" ---
         canvas = np.zeros((CANVAS_H, CANVAS_W, 3), dtype=np.uint8)
         canvas[:] = BG_COLOR
 
+        # Habitación 3D ESTÁTICA que cubre exactamente el 100% del lienzo (sin moverse)
         room_pts, room_depths = project(
-            ROOM_VERTS, yaw, pitch, roll_rad, distance, CANVAS_W, CANVAS_H, focal=FOCAL
+            ROOM_VERTS, 0.0, 0.0, 0.0, BASE_DISTANCE,
+            CANVAS_W, CANVAS_H, focal=FOCAL, offset_x=0.0, offset_y=0.0
         )
-        draw_wireframe(canvas, room_pts, room_depths, ROOM_EDGES, color=GRID_COLOR)
 
-        # --- modelos CAD ---
+        # 1. Dibujar rejilla de paredes, piso y techo del cuarto
+        draw_wireframe(canvas, room_pts, room_depths, ROOM_GRID_EDGES, color=GRID_COLOR, base_thickness=1)
+        # 2. Dibujar marco de esquinas del cuarto 3D
+        draw_wireframe(canvas, room_pts, room_depths, ROOM_FRAME_EDGES, color=FRAME_COLOR, base_thickness=2)
+
+        # --- MODELOS STL / CAD (Con rotación y movimiento amplificados) ---
+        stl_yaw = yaw * STL_YAW_MULT
+        stl_pitch = pitch * STL_PITCH_MULT
+        stl_roll = roll_rad * STL_ROLL_MULT
+        stl_distance = max(1.5, BASE_DISTANCE - hz * STL_ZOOM_MULT)
+
         for i, m in enumerate(models):
             pts, depths = project(
-                m["vertices"], yaw, pitch, roll_rad, distance,
+                m["vertices"], stl_yaw, stl_pitch, stl_roll, stl_distance,
                 CANVAS_W, CANVAS_H, focal=FOCAL,
+                offset_x=stl_tx, offset_y=stl_ty
             )
             color = MODEL_COLORS[i % len(MODEL_COLORS)]
-            draw_wireframe(canvas, pts, depths, m["edges"], color=color)
+            draw_wireframe(canvas, pts, depths, m["edges"], color=color, base_thickness=2)
             cx, cy = pts.mean(axis=0)
             label = m["name"][:16]
             cv2.putText(canvas, label, (int(cx) - 30, int(cy) - 15),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1, cv2.LINE_AA)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
 
         status = "Rostro detectado" if found else "Buscando rostro..."
         cv2.putText(canvas, status, (10, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5,

@@ -31,38 +31,77 @@ def cube(size=1.0):
     return vertices, edges
 
 
-def build_room(width=7.0, depth=8.0, floor_y=2.0, ceil_y=-2.8, step=0.7):
+def build_room(width=9.75, depth=9.0, floor_y=4.875, ceil_y=-4.875, num_grid_x=10, num_grid_y=10, num_grid_z=9):
     """
-    Genera una grilla tipo "cuarto de ingeniería": piso + pared trasera,
-    solo con líneas (muy barato de dibujar) para dar referencia de
-    perspectiva y profundidad al modelo CAD que flota en el centro.
+    Genera la estructura de un cuarto 3D que ocupa todo el lienzo (canvas):
+    - La boca frontal del cuarto (z = 0) coincide exactamente con los bordes del lienzo.
+    - Las 4 paredes (piso, techo, izquierda, derecha) convergen hacia la pared trasera.
     """
     verts = []
-    edges = []
+    grid_edges = []
+    frame_edges = []
 
-    def add_line(p1, p2):
+    def add_line(p1, p2, target_edges):
         i = len(verts)
         verts.append(p1)
         verts.append(p2)
-        edges.append((i, i + 1))
+        target_edges.append((i, i + 1))
 
-    xs = np.arange(-width / 2, width / 2 + 1e-6, step)
-    zs = np.arange(0.0, depth + 1e-6, step)
+    hw = width / 2.0
+    xs = np.linspace(-hw, hw, num_grid_x + 1)
+    ys = np.linspace(ceil_y, floor_y, num_grid_y + 1)
+    zs = np.linspace(0.0, depth, num_grid_z + 1)
 
-    # --- piso (plano horizontal, y = floor_y) ---
+    # --- piso (y = floor_y) ---
     for x in xs:
-        add_line((x, floor_y, 0.0), (x, floor_y, depth))
+        add_line((x, floor_y, 0.0), (x, floor_y, depth), grid_edges)
     for z in zs:
-        add_line((-width / 2, floor_y, z), (width / 2, floor_y, z))
+        add_line((-hw, floor_y, z), (hw, floor_y, z), grid_edges)
 
-    # --- pared trasera (plano vertical, z = depth) ---
-    ys = np.arange(ceil_y, floor_y + 1e-6, step)
+    # --- techo (y = ceil_y) ---
     for x in xs:
-        add_line((x, ceil_y, depth), (x, floor_y, depth))
-    for y in ys:
-        add_line((-width / 2, y, depth), (width / 2, y, depth))
+        add_line((x, ceil_y, 0.0), (x, ceil_y, depth), grid_edges)
+    for z in zs:
+        add_line((-hw, ceil_y, z), (hw, ceil_y, z), grid_edges)
 
-    return np.array(verts, dtype=np.float64), edges
+    # --- pared trasera (z = depth) ---
+    for x in xs:
+        add_line((x, ceil_y, depth), (x, floor_y, depth), grid_edges)
+    for y in ys:
+        add_line((-hw, y, depth), (hw, y, depth), grid_edges)
+
+    # --- pared izquierda (x = -hw) ---
+    for z in zs:
+        add_line((-hw, ceil_y, z), (-hw, floor_y, z), grid_edges)
+    for y in ys:
+        add_line((-hw, y, 0.0), (-hw, y, depth), grid_edges)
+
+    # --- pared derecha (x = hw) ---
+    for z in zs:
+        add_line((hw, ceil_y, z), (hw, floor_y, z), grid_edges)
+    for y in ys:
+        add_line((hw, y, 0.0), (hw, y, depth), grid_edges)
+
+    # --- esquinas/marco estructural principal del cuarto ---
+    # 4 vigas en profundidad (de z=0 a z=depth)
+    add_line((-hw, floor_y, 0.0), (-hw, floor_y, depth), frame_edges)
+    add_line((hw, floor_y, 0.0), (hw, floor_y, depth), frame_edges)
+    add_line((-hw, ceil_y, 0.0), (-hw, ceil_y, depth), frame_edges)
+    add_line((hw, ceil_y, 0.0), (hw, ceil_y, depth), frame_edges)
+
+    # marco trasero (z = depth)
+    add_line((-hw, floor_y, depth), (hw, floor_y, depth), frame_edges)
+    add_line((-hw, ceil_y, depth), (hw, ceil_y, depth), frame_edges)
+    add_line((-hw, floor_y, depth), (-hw, ceil_y, depth), frame_edges)
+    add_line((hw, floor_y, depth), (hw, ceil_y, depth), frame_edges)
+
+    # marco frontal (z = 0)
+    add_line((-hw, floor_y, 0.0), (hw, floor_y, 0.0), frame_edges)
+    add_line((-hw, ceil_y, 0.0), (hw, ceil_y, 0.0), frame_edges)
+    add_line((-hw, floor_y, 0.0), (-hw, ceil_y, 0.0), frame_edges)
+    add_line((hw, floor_y, 0.0), (hw, ceil_y, 0.0), frame_edges)
+
+    return np.array(verts, dtype=np.float64), grid_edges, frame_edges
 
 
 # ---------------------------------------------------------------------
